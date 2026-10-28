@@ -4,11 +4,19 @@ import GameCard from '../components/GameCard.astro';
 import PageHero from '../components/PageHero.astro';
 import EmptyState from '../components/EmptyState.astro';
 import { getDatabase } from '../lib/db';
-import { getAllGames } from '../lib/games';
+import { getAllGames, getPageCount } from '../lib/games';
 
 export const prerender = true;
 
-const games = await getAllGames(getDatabase());
+const pageSize = 6;
+const requestedPage = Number(Astro.url.searchParams.get('page') ?? '1');
+const currentPage = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+const allGames = await getAllGames(getDatabase());
+const totalPages = Math.max(1, getPageCount(allGames.length, pageSize));
+const safePage = Math.min(currentPage, totalPages);
+const games = allGames.slice((safePage - 1) * pageSize, safePage * pageSize);
+const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1);
+const gamesJson = JSON.stringify(allGames);
 ---
 
 <Layout title="Tailspin Toys - Crowdfunding your new favorite game!">
@@ -24,10 +32,193 @@ const games = await getAllGames(getDatabase());
       {games.length === 0 ? (
         <EmptyState text="No games available at the moment." />
       ) : (
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="games-grid">
-          {games.map((game) => <GameCard game={game} />)}
-        </div>
+        <>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="games-grid">
+            {games.map((game) => <GameCard game={game} />)}
+          </div>
+
+          {totalPages > 1 && (
+            <nav
+              class="mt-8 flex items-center justify-between gap-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4"
+              aria-label="Game list pagination"
+              data-testid="pagination-nav"
+            >
+              <a
+                href={safePage === 1 ? '/' : `/?page=${Math.max(1, safePage - 1)}`}
+                class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="pagination-previous"
+                data-page={Math.max(1, safePage - 1)}
+                aria-disabled={safePage === 1 ? 'true' : undefined}
+                tabindex={safePage === 1 ? -1 : 0}
+              >
+                Previous
+              </a>
+
+              <div class="flex flex-wrap items-center justify-center gap-2">
+                {pageNumbers.map((pageNumber) => (
+                  <a
+                    href={pageNumber === 1 ? '/' : `/?page=${pageNumber}`}
+                    class:list={[
+                      'min-w-10 rounded-lg border px-3 py-2 text-sm font-medium transition',
+                      pageNumber === safePage
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700',
+                    ]}
+                    data-testid={`pagination-page-${pageNumber}`}
+                    data-page={pageNumber}
+                    aria-current={pageNumber === safePage ? 'page' : undefined}
+                  >
+                    {pageNumber}
+                  </a>
+                ))}
+              </div>
+
+              <a
+                href={safePage >= totalPages ? `/?page=${totalPages}` : `/?page=${safePage + 1}`}
+                class="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="pagination-next"
+                data-page={Math.min(totalPages, safePage + 1)}
+                aria-disabled={safePage >= totalPages ? 'true' : undefined}
+                tabindex={safePage >= totalPages ? -1 : 0}
+              >
+                Next
+              </a>
+            </nav>
+          )}
+        </>
       )}
     </div>
   </div>
 </Layout>
+
+<script is:inline define:vars={{ gamesJson, pageSize, initialPage: safePage }}>
+  const allGames = JSON.parse(gamesJson);
+  const pageSizeValue = Number(pageSize);
+  const grid = document.querySelector('[data-testid="games-grid"]');
+  const previousButton = document.querySelector('[data-testid="pagination-previous"]');
+  const nextButton = document.querySelector('[data-testid="pagination-next"]');
+  const pageButtons = Array.from(document.querySelectorAll('[data-testid^="pagination-page-"]'));
+
+  const updateUrl = (pageNumber) => {
+    const params = new URLSearchParams(window.location.search);
+    const maxPages = Math.max(1, Math.ceil(allGames.length / pageSizeValue));
+    const safePage = Math.min(Math.max(pageNumber, 1), maxPages);
+
+    if (safePage === 1) {
+      params.delete('page');
+    } else {
+      params.set('page', String(safePage));
+    }
+
+    const query = params.toString();
+    const target = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    window.history.pushState({}, '', target);
+  };
+
+  const renderGameCard = (game) => {
+    const categoryMarkup = game.category?.name
+      ? `<span class="rounded-full bg-blue-500/15 px-2 py-1 text-xs font-medium text-blue-300" data-testid="game-category">${game.category.name}</span>`
+      : '';
+    const publisherMarkup = game.publisher?.name
+      ? `<span class="rounded-full bg-purple-500/15 px-2 py-1 text-xs font-medium text-purple-300" data-testid="game-publisher">${game.publisher.name}</span>`
+      : '';
+    const tagMarkup = categoryMarkup || publisherMarkup
+      ? `<div class="flex gap-2 mb-3">${categoryMarkup}${publisherMarkup}</div>`
+      : '';
+
+    return `
+      <a
+        href="/game/${game.id}"
+        class="group block bg-slate-800/60 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-slate-700/50 hover:border-blue-500/50 hover:shadow-blue-500/10 hover:shadow-xl transition-all duration-300 hover:translate-y-[-6px]"
+        data-testid="game-card"
+        data-game-id="${game.id}"
+        data-game-title="${game.title}"
+      >
+        <div class="p-6 relative">
+          <div class="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-purple-600/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative z-10">
+            <h3 class="text-xl font-semibold text-slate-100 mb-2 group-hover:text-blue-400 transition-colors" data-testid="game-title">${game.title}</h3>
+            ${tagMarkup}
+            <p class="text-slate-400 mb-4 text-sm line-clamp-2" data-testid="game-description">${game.description}</p>
+            <div class="mt-4 text-sm text-blue-400 font-medium flex items-center">
+              <span>View details</span>
+              <span aria-hidden="true" class="ml-1">→</span>
+            </div>
+          </div>
+        </div>
+      </a>
+    `;
+  };
+
+  const renderPage = (pageNumber) => {
+    const totalPages = Math.max(1, Math.ceil(allGames.length / pageSizeValue));
+    const safePage = Math.min(Math.max(pageNumber, 1), totalPages);
+    const startIndex = (safePage - 1) * pageSizeValue;
+    const visibleGames = allGames.slice(startIndex, startIndex + pageSizeValue);
+
+    if (grid) {
+      grid.innerHTML = visibleGames.map(renderGameCard).join('');
+    }
+
+    if (previousButton) {
+      previousButton.dataset.page = String(Math.max(1, safePage - 1));
+      previousButton.setAttribute('aria-disabled', safePage === 1 ? 'true' : 'false');
+      previousButton.setAttribute('tabindex', safePage === 1 ? '-1' : '0');
+      previousButton.href = safePage === 1 ? '/' : `/?page=${Math.max(1, safePage - 1)}`;
+    }
+
+    if (nextButton) {
+      nextButton.dataset.page = String(Math.min(totalPages, safePage + 1));
+      nextButton.setAttribute('aria-disabled', safePage >= totalPages ? 'true' : 'false');
+      nextButton.setAttribute('tabindex', safePage >= totalPages ? '-1' : '0');
+      nextButton.href = safePage >= totalPages ? `/?page=${totalPages}` : `/?page=${safePage + 1}`;
+    }
+
+    pageButtons.forEach((button) => {
+      const buttonPage = Number(button.dataset.page || 1);
+      const isActive = buttonPage === safePage;
+
+      if (isActive) {
+        button.setAttribute('aria-current', 'page');
+      } else {
+        button.removeAttribute('aria-current');
+      }
+
+      button.className = [
+        'min-w-10 rounded-lg border px-3 py-2 text-sm font-medium transition',
+        isActive
+          ? 'border-blue-500 bg-blue-600 text-white'
+          : 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700',
+      ].join(' ');
+    });
+
+    updateUrl(safePage);
+  };
+
+  pageButtons.forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const page = Number(button.dataset.page || 1);
+      renderPage(page);
+    });
+  });
+
+  if (previousButton) {
+    previousButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      const page = Number(previousButton.dataset.page || 1);
+      renderPage(page);
+    });
+  }
+
+  if (nextButton) {
+    nextButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      const page = Number(nextButton.dataset.page || 1);
+      renderPage(page);
+    });
+  }
+
+  const initialPageFromUrl = Number(new URLSearchParams(window.location.search).get('page') ?? initialPage);
+  renderPage(Number.isFinite(initialPageFromUrl) ? initialPageFromUrl : initialPage);
+</script>
