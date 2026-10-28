@@ -86,6 +86,25 @@ test.describe('Game Listing and Navigation', () => {
     });
   });
 
+  test('should paginate through the game list', async ({ page }) => {
+    await test.step('Open the homepage and verify pagination controls', async () => {
+      await page.goto('/');
+      await expect(page.getByTestId('pagination-nav')).toBeVisible();
+      await expect(page.getByTestId('pagination-page-1')).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId('pagination-next')).toBeVisible();
+    });
+
+    await test.step('Move to the next page and confirm the content changes', async () => {
+      const nextPageButton = page.getByTestId('pagination-next');
+      await nextPageButton.click();
+      await expect(page).toHaveURL(/\?page=2$/);
+      await expect(page.getByTestId('pagination-page-2')).toHaveAttribute('aria-current', 'page');
+      const firstGameOnPageTwo = page.getByTestId('game-card').first();
+      await expect(firstGameOnPageTwo).toBeVisible();
+      await expect(firstGameOnPageTwo.getByTestId('game-title')).not.toHaveText('');
+    });
+  });
+
   test('should display a button to back the game', async ({ page }) => {
     await test.step('Navigate to game details page', async () => {
       await page.goto('/game/1');
